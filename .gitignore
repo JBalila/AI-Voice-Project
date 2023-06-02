@@ -1,2 +1,5 @@
 .env
+.flaskenv
 /.venv
+/recordings
+/__pycache__
