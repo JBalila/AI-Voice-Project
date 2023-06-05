@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from flask import Flask, request, Response
 from twilio.rest import Client as TwilioClient
 from twilio.twiml.voice_response import VoiceResponse
+import openai
 
 # Import API keys from .env file
 load_dotenv()
@@ -13,15 +14,24 @@ NGROK_ADDRESS=os.getenv('NGROK_ADDRESS')
 TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
 TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
 TWILIO_PHONE_NUMBER = os.getenv('TWILIO_PHONE_NUMBER')
-WHISPER_API_KEY = os.getenv('WHISPER_API_KEY')
-CHATGPT_API_KEY = os.getenv('CHATGPT_API_KEY')
-ELEVENLABS_API_KEY = os.getenv('ELEVENLABS_API_KEY')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
-# Flask app constants
-UPLOAD_FOLDER = os.path.join(os.getcwd(), 'recordings')
+# Global variables
+RECORDINGS_FOLDER = os.path.join(os.getcwd(), 'recordings')
+RESPONSE_FOLDER = os.path.join(os.getcwd(), 'responses')
+context = 'Hey, how are you?'
+order_num = 1
+recordingReady = False
+recordingFilepath = None
+responseReady = False
+responseFilepath = None
+
 
 # Create a Flask web server
 app = Flask(__name__)
+
+# Configure OpenAI parameters
+openai.api_key = OPENAI_API_KEY
 
 # Create a call and connect it to the web server
 # This call will be used to handle the conversation
@@ -29,97 +39,108 @@ twilio_client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 twilio_client.calls.create(
     to='+13059342479',
     from_=TWILIO_PHONE_NUMBER,
-    url=NGROK_ADDRESS,
+    url=f'{NGROK_ADDRESS}/prompt',
     method='POST',
-    record=True,
-    recording_status_callback=f'{NGROK_ADDRESS}/recording-finished',
-    recording_status_callback_event='completed',
-    recording_status_callback_method='GET'
+    status_callback=f'{NGROK_ADDRESS}/merge-mp3s',
+    status_callback_event='completed',
+    status_callback_method='POST'
 )
 
-# Call is connected, wait a little bit and then say 'Hello'
-@app.route('/', methods=['POST'])
-def talk():
+# Call is connected, begin conversation
+@app.route('/prompt', methods=['POST'])
+def prompt():
+    # Declare global vars
+    global order_num
+    global context
     response = VoiceResponse()
-    response.say('Hello!')
-    response.pause(length=2)
-    print(response)
+    
+    # Use <context> to say something with ElevenLabs, then listen for response
+    # After listening to response, send .mp3 to Whisper to transcribe it
+    # After transcribing, use ChatGPT to generate natural response
+    response.say(context)
+    response.record(
+        timeout=2,
+        playBeep=False,
+        action=f'{NGROK_ADDRESS}/wait',
+        method='POST',
+        recording_status_callback=f'{NGROK_ADDRESS}/upload-recording',
+        recording_status_callback_event='completed',
+        recording_status_callback_method='GET'
+    )
 
     return Response(str(response), 200, mimetype='application/xml')
 
-# Call has ended, print response data
-@app.route('/recording-finished', methods=['GET'])
-def on_call_ended():
-    # Get info from request body (<RecordingUrl> and <RecordingSid>)
+# Wait until recording is ready to play
+@app.route('/wait', methods=['POST'])
+def wait_and_respond():
+    # Declare global vars
+    global recordingReady
+    global responseFilepath
+    response = VoiceResponse()
+
+    # Wait until we have an audiofile to play
+    response.pause(length=3)
+    response.redirect(f'{NGROK_ADDRESS}/generate-response', method=['POST'])
+
+    # Reset <recordingReady> and return
+    recordingReady = False
+    return Response(str(response), 200, mimetype='application/xml')
+
+
+# Recording has ended, add to 'recordings/' folder
+@app.route('/upload-recording', methods=['GET'])
+def upload_recording():
+    global recordingFilepath
+    global recordingReady
+    global order_num
+
+    # Get info from request body (<RecordingUrl> and <CallSid>)
     args = request.args.to_dict()
     recordingURL = str(args['RecordingUrl'])
-    filename = str(args['CallSid']) + '.mp3'
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    callSID = str(args['CallSid'])
+    filename = f'{order_num}_{callSID}.mp3'
+    recordingFilepath = os.path.join(RECORDINGS_FOLDER, filename)
 
-    # Download URL and write to 'Recordings/' folder
+    # Download URL and write to 'recordings/' folder
     mp3_file = requests.get(recordingURL, allow_redirects=True)
-    open(filepath, 'wb').write(mp3_file.content)
+    open(recordingFilepath, 'wb').write(mp3_file.content)
 
+    order_num += 1
+    recordingReady = True
     return 'Recording finished'
 
-# # Global variables
-# call_sid = None
-# context = "Hi there it's me."
+@app.route('/generate-response', methods=['POST'])
+def generate_response():
+    # Declare global vars
+    global context
+    global recordingFilepath
+    global responseReady
+    global responseFilepath
+    response = VoiceResponse()
 
-# # Define a function to handle incoming requests.
-# # This function is called when a request is received from the web server.
-# @app.route('/assistant', methods=['POST'])
-# def assistant():
-#     global context
-#     user_input = request.values.get('SpeechResult')
+    # Transcribe mp3 file with OpenAI's Whisper
+    transcription = openai.Audio.transcribe('whisper-1', open(recordingFilepath, 'rb')).text
+    print('Transcription: ' + transcription)
 
-#     # Replace this with a real call to the OpenAI API
-#     # This call generates a response from OpenAI's ChatGPT
-#     response = openai_api_call(prompt)
-#     chatgpt_response = response
+    # Use <transcription> to update <context> and play it back to recipient
+    gptResponse = openai.ChatCompletion.create(
+        model='gpt-3.5-turbo',
+        messages=[
+            {'role': 'system', 'content': 'You are calling your friend to say hello.'},
+            {'role': 'user', 'content': transcription}
+        ]
+    )
+    context = gptResponse.choices[0].message.content
+    print('Context: ' + context)
 
-#     # Send the response to Eleven Labs.
-#     # This service synthesizes the response into audio.
-#     data = {"input": chatgpt_response}
-#     response = requests.post(
-#         "https://api.elevenlabs.ai/v1/synthesize",
-#         headers={"Authorization": f"Bearer {ELEVENLABS_API_KEY}"},
-#         data=data
-#     )
-#     audio_data = response.content
+    # Use the updated <context> to respond to the recipient
+    response.redirect('/prompt', methods=['POST'])
+    return Response(str(response), 200, mimetype='application/xml')
 
-#     # Create a TwiML response.
-#     # This response plays the synthesized audio.
-#     twiml = VoiceResponse()
-#     twiml.play(audio_data)
-
-#     # Update the context.
-#     # This variable is used to store the conversation history.
-#     context += f"\nHuman: {user_input}\nClaude: {chatgpt_response}"
-
-#     # Return the TwiML response.
-#     return Response(str(twiml), mimetype='text/xml')
-
-# # Define a function to call the OpenAI API
-# # This function generates a response from OpenAI's ChatGPT
-# def openai_api_call(prompt):
-#     # This is a placeholder function, replace with a real call to the OpenAI API
-#     response = requests.post(
-#         "https://api.openai.com/v1/engines/davinci/completions",
-#         headers={
-#             "Authorization": f"Bearer {OPENAI_API_KEY}",
-#             "Content-Type": "application/x-www-form-urlencoded",
-#         },
-#         data={
-#             "prompt": prompt,
-#             "temperature": 0.7,
-#             "max_tokens": 100,
-#             "n": 1,
-#             "no_repeat_ngram_size": 3,
-#             "early_stopping": True,
-#         },
-#     )
-#     return response.json()["choices"][0]["text"]
+# Call has ended, merge .mp3 files into one .mp3 file
+@app.route('/merge-mp3s', methods=['POST'])
+def merge_mp3s():
+    return 'Done merging mp3s'
 
 # Run the app
 if __name__ == "__main__":
