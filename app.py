@@ -15,6 +15,7 @@ TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
 TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
 TWILIO_PHONE_NUMBER = os.getenv('TWILIO_PHONE_NUMBER')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+ELEVENLABS_API_KEY = os.getenv('ELEVENLABS_API_KEY')
 
 # Global variables
 RECORDINGS_FOLDER = os.path.join(os.getcwd(), 'recordings')
@@ -23,8 +24,6 @@ context = 'Hey, how are you?'
 orderNum = 1
 recordingReady = False
 recordingFilepath = None
-responseReady = False
-responseFilepath = None
 
 
 # Create a Flask web server
@@ -46,17 +45,19 @@ twilioClient.calls.create(
     status_callback_method='POST'
 )
 
-# Call is connected, begin conversation
+# Use <context> to say something with ElevenLabs, then listen for response
+# After listening to response, send .mp3 to Whisper to transcribe it
+# After transcribing, use ChatGPT to generate natural response
 @app.route('/prompt', methods=['POST'])
 def prompt():
     # Declare global vars
     global orderNum
     global context
     response = VoiceResponse()
-    
-    # Use <context> to say something with ElevenLabs, then listen for response
-    # After listening to response, send .mp3 to Whisper to transcribe it
-    # After transcribing, use ChatGPT to generate natural response
+
+    # Create .mp3 file of <context> with ElevenLabs, store in 'responses/' folder
+
+    # Play the <responseMP3> to the recipient and record their response
     response.say(context)
     response.record(
         timeout=2,
@@ -75,7 +76,6 @@ def prompt():
 def wait_and_respond():
     # Declare global vars
     global recordingReady
-    global responseFilepath
     response = VoiceResponse()
 
     # Wait until we have an audiofile to play
@@ -114,8 +114,6 @@ def generate_response():
     # Declare global vars
     global context
     global recordingFilepath
-    global responseReady
-    global responseFilepath
     response = VoiceResponse()
 
     # Transcribe mp3 file with OpenAI's Whisper
@@ -126,7 +124,7 @@ def generate_response():
     gptResponse = openai.ChatCompletion.create(
         model='gpt-3.5-turbo',
         messages=[
-            {'role': 'system', 'content': 'You are calling your friend to say hello.'},
+            {'role': 'system', 'content': 'You are calling your friend to say hello. Pretend you are not an AI.'},
             {'role': 'user', 'content': transcription}
         ]
     )
