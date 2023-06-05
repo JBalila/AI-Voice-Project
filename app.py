@@ -20,7 +20,7 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 RECORDINGS_FOLDER = os.path.join(os.getcwd(), 'recordings')
 RESPONSE_FOLDER = os.path.join(os.getcwd(), 'responses')
 context = 'Hey, how are you?'
-order_num = 1
+orderNum = 1
 recordingReady = False
 recordingFilepath = None
 responseReady = False
@@ -35,8 +35,8 @@ openai.api_key = OPENAI_API_KEY
 
 # Create a call and connect it to the web server
 # This call will be used to handle the conversation
-twilio_client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-twilio_client.calls.create(
+twilioClient = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+twilioClient.calls.create(
     to='+13059342479',
     from_=TWILIO_PHONE_NUMBER,
     url=f'{NGROK_ADDRESS}/prompt',
@@ -50,7 +50,7 @@ twilio_client.calls.create(
 @app.route('/prompt', methods=['POST'])
 def prompt():
     # Declare global vars
-    global order_num
+    global orderNum
     global context
     response = VoiceResponse()
     
@@ -92,20 +92,20 @@ def wait_and_respond():
 def upload_recording():
     global recordingFilepath
     global recordingReady
-    global order_num
+    global orderNum
 
     # Get info from request body (<RecordingUrl> and <CallSid>)
     args = request.args.to_dict()
     recordingURL = str(args['RecordingUrl'])
     callSID = str(args['CallSid'])
-    filename = f'{order_num}_{callSID}.mp3'
+    filename = f'{orderNum}_{callSID}.mp3'
     recordingFilepath = os.path.join(RECORDINGS_FOLDER, filename)
 
     # Download URL and write to 'recordings/' folder
-    mp3_file = requests.get(recordingURL, allow_redirects=True)
-    open(recordingFilepath, 'wb').write(mp3_file.content)
+    mp3File = requests.get(recordingURL, allow_redirects=True)
+    open(recordingFilepath, 'wb').write(mp3File.content)
 
-    order_num += 1
+    orderNum += 1
     recordingReady = True
     return 'Recording finished'
 
