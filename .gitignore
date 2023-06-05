@@ -2,5 +2,6 @@
 .flaskenv
 /.venv
 /recordings
+/final_recordings
 /responses
 /__pycache__
