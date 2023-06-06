@@ -4,7 +4,6 @@ import requests
 from dotenv import load_dotenv
 from pydub import AudioSegment
 from flask import Flask, request, Response, send_file
-from flask_cors import CORS
 from twilio.rest import Client as TwilioClient
 from twilio.twiml.voice_response import VoiceResponse
 from elevenlabs import set_api_key, generate, save
@@ -25,7 +24,7 @@ ELEVENLABS_API_KEY = os.getenv('ELEVENLABS_API_KEY')
 RECORDINGS_FOLDER = os.path.join(os.getcwd(), 'recordings')
 FINAL_RECORDINGS_FOLDER = os.path.join(os.getcwd(), 'final_recordings')
 RESPONSE_FILE = os.path.join(os.getcwd(), 'static', 'response.wav')
-INITIAL_PROMPT = 'Hey... how are you?'
+INITIAL_PROMPT = 'Hey, I don\'t have good signal but I wanted to call real quick.'
 VOICES = ['Rachel', 'Domi', 'Bella', 'Antoni']
 
 # Global program variables
@@ -88,7 +87,7 @@ def prompt():
     response.record(
         timeout=2,
         playBeep=False,
-        action=f'{NGROK_ADDRESS}/wait',
+        action=f'{NGROK_ADDRESS}/generate-response',
         method='POST',
         recording_status_callback=f'{NGROK_ADDRESS}/upload-recording',
         recording_status_callback_event='completed',
@@ -105,7 +104,7 @@ def wait_and_respond():
     response = VoiceResponse()
 
     # Wait until we have an audiofile to play
-    response.pause(length=3)
+    response.pause(length=2)
     response.redirect(f'{NGROK_ADDRESS}/generate-response', method=['POST'])
 
     # Reset <recordingReady> and return
@@ -145,29 +144,34 @@ def generate_response():
     response = VoiceResponse()
 
     # Transcribe mp3 file with OpenAI's Whisper
-    transcription = openai.Audio.transcribe('whisper-1', open(recordingFilepath, 'rb')).text
-    print('Transcription: ' + transcription)
+    try:
+        transcription = openai.Audio.transcribe('whisper-1', open(recordingFilepath, 'rb')).text
+        print('Transcription: ' + transcription)
+    except:
+        response.pause(length=1)
+        response.redirect(f'{NGROK_ADDRESS}/generate-response')
+    else:
+        # Update the <messageHistory> with the user's response
+        messageHistory.append(
+            {'role': 'user', 'content': transcription}
+        )
 
-    # Update the <messageHistory> with the user's response
-    messageHistory.append(
-        {'role': 'user', 'content': transcription}
-    )
+        # Use <transcription> to update <context>
+        gptResponse = openai.ChatCompletion.create(
+            model='gpt-3.5-turbo',
+            messages=messageHistory
+        )
+        context = gptResponse.choices[0].message.content
+        print('Context: ' + context)
 
-    # Use <transcription> to update <context>
-    gptResponse = openai.ChatCompletion.create(
-        model='gpt-3.5-turbo',
-        messages=messageHistory
-    )
-    context = gptResponse.choices[0].message.content
-    print('Context: ' + context)
+        # Update the <messageHistory> with ChatGPT's response
+        messageHistory.append(
+            {'role': 'assistant', 'content': context}
+        )
 
-    # Update the <messageHistory> with ChatGPT's response
-    messageHistory.append(
-        {'role': 'assistant', 'content': context}
-    )
-
-    # Use the updated <context> to respond to the recipient
-    response.redirect('/prompt', methods=['POST'])
+        # Use the updated <context> to respond to the recipient
+        response.redirect('/prompt', methods=['POST'])
+    
     return Response(str(response), 200, mimetype='application/xml')
 
 # Call has ended, merge .wav files into one .wav file
