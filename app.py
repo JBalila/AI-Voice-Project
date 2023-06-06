@@ -36,6 +36,7 @@ messageHistory = [
     {'role': 'system', 'content': 'You are calling your friend. Do not say you are an AI.'},
     {'role': 'assistant', 'content': INITIAL_PROMPT}
 ]
+uploadTime = None
 
 # Create a Flask web server
 app = Flask(__name__)
@@ -75,17 +76,19 @@ def prompt():
     response = VoiceResponse()
 
     # Generate raw audio byte-data with ElevenLabs and save to 'responses/response.wav'
+    st = time.time()
     audioBytes = generate(
         text=context,
         voice='Bella',
         model='eleven_monolingual_v1'
     )
     save(audioBytes, RESPONSE_FILE)
+    print(f'Time to generate audio: {time.time() - st}')
 
     # Play the <responseWAV> to the recipient and record their response
     response.play(f'{NGROK_ADDRESS}/get-response-wav')
     response.record(
-        timeout=2,
+        timeout=1,
         playBeep=False,
         action=f'{NGROK_ADDRESS}/generate-response',
         method='POST',
@@ -96,28 +99,16 @@ def prompt():
 
     return Response(str(response), 200, mimetype='application/xml')
 
-# Wait until recording is ready to play
-@app.route('/wait', methods=['POST'])
-def wait_and_respond():
-    # Declare global vars
-    global recordingReady
-    response = VoiceResponse()
-
-    # Wait until we have an audiofile to play
-    response.pause(length=2)
-    response.redirect(f'{NGROK_ADDRESS}/generate-response', method=['POST'])
-
-    # Reset <recordingReady> and return
-    recordingReady = False
-    return Response(str(response), 200, mimetype='application/xml')
-
-
 # Recording has ended, add to 'recordings/' folder
 @app.route('/upload-recording', methods=['GET'])
 def upload_recording():
     global recordingFilepath
     global recordingReady
     global orderNum
+    global uploadTime
+
+    print(f'Time to upload: {time.time() - uploadTime}')
+    uploadTime = time.time()
 
     # Get info from request body (<RecordingUrl> and <CallSid>)
     args = request.args.to_dict()
@@ -130,6 +121,9 @@ def upload_recording():
     wavFile = requests.get(recordingURL, allow_redirects=True)
     open(recordingFilepath, 'wb').write(wavFile.content)
 
+    print(f'Time to write to file: {time.time() - uploadTime}')
+    uploadTime = None
+
     orderNum += 1
     recordingReady = True
     return 'Recording finished'
@@ -141,12 +135,17 @@ def generate_response():
     global recordingFilepath
     global messageHistory
     global context
+    global uploadTime
     response = VoiceResponse()
+
+    if uploadTime is None:
+        uploadTime = time.time()
 
     # Transcribe mp3 file with OpenAI's Whisper
     try:
+        st = time.time()
         transcription = openai.Audio.transcribe('whisper-1', open(recordingFilepath, 'rb')).text
-        print('Transcription: ' + transcription)
+        print(f'Time to transcribe: {time.time() - st}')
     except:
         response.pause(length=1)
         response.redirect(f'{NGROK_ADDRESS}/generate-response')
@@ -157,12 +156,13 @@ def generate_response():
         )
 
         # Use <transcription> to update <context>
+        st = time.time()
         gptResponse = openai.ChatCompletion.create(
             model='gpt-3.5-turbo',
             messages=messageHistory
         )
         context = gptResponse.choices[0].message.content
-        print('Context: ' + context)
+        print(f'Time to generate context: {time.time() - st}')
 
         # Update the <messageHistory> with ChatGPT's response
         messageHistory.append(
