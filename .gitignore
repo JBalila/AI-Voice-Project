@@ -3,5 +3,5 @@
 /.venv
 /recordings
 /final_recordings
-/responses
+/static
 /__pycache__
