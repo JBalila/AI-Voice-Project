@@ -96,8 +96,8 @@ def prompt():
     # Play the <responseWAV> to the recipient and record their response
     response.play(f'{NGROK_ADDRESS}/get-response-wav')
     response.record(
-        timeout=1,
-        maxLength=3,
+        timeout=2,
+        maxLength=10,
         playBeep=False,
         action=f'{NGROK_ADDRESS}/generate-response',
         method='POST',
@@ -146,20 +146,23 @@ def generate_response():
     global context
     global uploadTime
     response = VoiceResponse()
-    transcription = None
+    audioFile = None
 
     if uploadTime is None:
         uploadTime = time.time()
 
-    # Transcribe mp3 file with OpenAI's Whisper
+    # Check if the audio file is ready to be opened
     try:
-        st = time.time()
-        transcription = openai.Audio.transcribe('whisper-1', open(recordingFilepath, 'rb')).text
-        print(f'Time to transcribe: {time.time() - st}')
+        audioFile = open(recordingFilepath, 'rb')
     except:
-        time.sleep(4)
+        time.sleep(0.75)
         response.redirect(f'{NGROK_ADDRESS}/generate-response')
     else:
+        # Transcribe <audioFile> with OpenAI's Whisper
+        st = time.time()
+        transcription = openai.Audio.transcribe('whisper-1', audioFile).text
+        print(f'Time to transcribe: {time.time() - st}')
+
         # Update the <messageHistory> with the user's response
         messageHistory.append(
             {'role': 'user', 'content': transcription}
