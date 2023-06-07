@@ -37,6 +37,7 @@ messageHistory = [
     {'role': 'assistant', 'content': INITIAL_PROMPT}
 ]
 uploadTime = None
+responseTime = None
 
 # Create a Flask web server
 app = Flask(__name__)
@@ -73,7 +74,14 @@ def prompt():
     # Declare global vars
     global orderNum
     global context
+    global responseTime
     response = VoiceResponse()
+
+    if responseTime is None:
+        responseTime = time.time()
+    else:
+        print(f'Total time for response: {time.time() - responseTime}')
+        responseTime = time.time()
 
     # Generate raw audio byte-data with ElevenLabs and save to 'responses/response.wav'
     st = time.time()
@@ -89,6 +97,7 @@ def prompt():
     response.play(f'{NGROK_ADDRESS}/get-response-wav')
     response.record(
         timeout=1,
+        maxLength=3,
         playBeep=False,
         action=f'{NGROK_ADDRESS}/generate-response',
         method='POST',
@@ -137,6 +146,7 @@ def generate_response():
     global context
     global uploadTime
     response = VoiceResponse()
+    transcription = None
 
     if uploadTime is None:
         uploadTime = time.time()
@@ -147,7 +157,7 @@ def generate_response():
         transcription = openai.Audio.transcribe('whisper-1', open(recordingFilepath, 'rb')).text
         print(f'Time to transcribe: {time.time() - st}')
     except:
-        response.pause(length=1)
+        time.sleep(4)
         response.redirect(f'{NGROK_ADDRESS}/generate-response')
     else:
         # Update the <messageHistory> with the user's response
@@ -162,7 +172,7 @@ def generate_response():
             messages=messageHistory
         )
         context = gptResponse.choices[0].message.content
-        print(f'Time to generate context: {time.time() - st}')
+        print(f'Time to chat completion: {time.time() - st}')
 
         # Update the <messageHistory> with ChatGPT's response
         messageHistory.append(
