@@ -1,34 +1,9 @@
-import os
-import time
-import requests
-from dotenv import load_dotenv
-from pydub import AudioSegment
-from flask import Flask, request, Response, send_file
-from twilio.rest import Client as TwilioClient
-from twilio.twiml.voice_response import VoiceResponse
-from elevenlabs import set_api_key, generate, save
-import openai
-
-# Import API keys from .env file
-load_dotenv()
-
-# API Keys
-NGROK_ADDRESS=os.getenv('NGROK_ADDRESS')
-TWILIO_ACCOUNT_SID = os.getenv('TWILIO_ACCOUNT_SID')
-TWILIO_AUTH_TOKEN = os.getenv('TWILIO_AUTH_TOKEN')
-TWILIO_PHONE_NUMBER = os.getenv('TWILIO_PHONE_NUMBER')
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-ELEVENLABS_API_KEY = os.getenv('ELEVENLABS_API_KEY')
-
-# Global constants
-RECORDINGS_FOLDER = os.path.join(os.getcwd(), 'recordings')
-FINAL_RECORDINGS_FOLDER = os.path.join(os.getcwd(), 'final_recordings')
-RESPONSE_FILE = os.path.join(os.getcwd(), 'static', 'response.wav')
-INITIAL_PROMPT = 'Hey, I don\'t have good signal but I wanted to call real quick.'
-VOICES = ['Rachel', 'Domi', 'Bella', 'Antoni']
+from libraryImports import *
+from api_keys import *
+from globalConstants import *
 
 # Global program variables
-context = INITIAL_PROMPT
+aiResponse = INITIAL_PROMPT
 orderNum = 1
 recordingReady = False
 recordingFilepath = None
@@ -36,8 +11,6 @@ messageHistory = [
     {'role': 'system', 'content': 'You are calling your friend. Do not say you are an AI.'},
     {'role': 'assistant', 'content': INITIAL_PROMPT}
 ]
-uploadTime = None
-responseTime = None
 
 # Create a Flask web server
 app = Flask(__name__)
@@ -66,32 +39,23 @@ def get_response_wav():
     else:
         return 'Nothing to send'
 
-# Use <context> to say something with ElevenLabs, then listen for response
+# Use <aiResponse> to say something with ElevenLabs, then listen for response
 # After listening to response, send .wav to Whisper to transcribe it
 # After transcribing, use ChatGPT to generate natural response
 @app.route('/prompt', methods=['POST'])
 def prompt():
     # Declare global vars
     global orderNum
-    global context
-    global responseTime
+    global aiResponse
     response = VoiceResponse()
 
-    if responseTime is None:
-        responseTime = time.time()
-    else:
-        print(f'Total time for response: {time.time() - responseTime}')
-        responseTime = time.time()
-
     # Generate raw audio byte-data with ElevenLabs and save to 'responses/response.wav'
-    st = time.time()
     audioBytes = generate(
-        text=context,
+        text=aiResponse,
         voice='Bella',
         model='eleven_monolingual_v1'
     )
     save(audioBytes, RESPONSE_FILE)
-    print(f'Time to generate audio: {time.time() - st}')
 
     # Play the <responseWAV> to the recipient and record their response
     response.play(f'{NGROK_ADDRESS}/get-response-wav')
@@ -114,10 +78,6 @@ def upload_recording():
     global recordingFilepath
     global recordingReady
     global orderNum
-    global uploadTime
-
-    print(f'Time to upload: {time.time() - uploadTime}')
-    uploadTime = time.time()
 
     # Get info from request body (<RecordingUrl> and <CallSid>)
     args = request.args.to_dict()
@@ -130,9 +90,6 @@ def upload_recording():
     wavFile = requests.get(recordingURL, allow_redirects=True)
     open(recordingFilepath, 'wb').write(wavFile.content)
 
-    print(f'Time to write to file: {time.time() - uploadTime}')
-    uploadTime = None
-
     orderNum += 1
     recordingReady = True
     return 'Recording finished'
@@ -143,46 +100,39 @@ def generate_response():
     # Declare global vars
     global recordingFilepath
     global messageHistory
-    global context
-    global uploadTime
+    global aiResponse
+
     response = VoiceResponse()
     audioFile = None
-
-    if uploadTime is None:
-        uploadTime = time.time()
 
     # Check if the audio file is ready to be opened
     try:
         audioFile = open(recordingFilepath, 'rb')
+    # <audioFile> isn't ready yet, play a random filler-phrase to fill time
     except:
-        time.sleep(0.75)
+        audioBytes = generate(
+            text=FILLER_PHRASES[random.randint(0, len(FILLER_PHRASES)-1)],
+            voice='Bella',
+            model='eleven_monolingual_v1'
+        )
+        save(audioBytes, RESPONSE_FILE)
+        response.play(f'{NGROK_ADDRESS}/get-response-wav')
         response.redirect(f'{NGROK_ADDRESS}/generate-response')
+    # <audioFile> ready to use
     else:
         # Transcribe <audioFile> with OpenAI's Whisper
-        st = time.time()
         transcription = openai.Audio.transcribe('whisper-1', audioFile).text
-        print(f'Time to transcribe: {time.time() - st}')
 
-        # Update the <messageHistory> with the user's response
-        messageHistory.append(
-            {'role': 'user', 'content': transcription}
-        )
-
-        # Use <transcription> to update <context>
-        st = time.time()
+        # Update <messageHistory> with <transcription> and create reply with ChatGPT
+        messageHistory.append({'role': 'user', 'content': transcription})
         gptResponse = openai.ChatCompletion.create(
             model='gpt-3.5-turbo',
             messages=messageHistory
         )
-        context = gptResponse.choices[0].message.content
-        print(f'Time to chat completion: {time.time() - st}')
+        aiResponse = gptResponse.choices[0].message.content
 
         # Update the <messageHistory> with ChatGPT's response
-        messageHistory.append(
-            {'role': 'assistant', 'content': context}
-        )
-
-        # Use the updated <context> to respond to the recipient
+        messageHistory.append({'role': 'assistant', 'content': aiResponse})
         response.redirect('/prompt', methods=['POST'])
     
     return Response(str(response), 200, mimetype='application/xml')
