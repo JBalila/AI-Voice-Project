@@ -46,12 +46,29 @@ def prompt():
     response = VoiceResponse()
 
     # Generate audio for <aiResponse> and play back to the recipient
-    audioBytes = generate(
-        text=aiResponse,
-        voice='Bella',
-        model='eleven_monolingual_v1'
-    )
-    save(audioBytes, RESPONSE_FILE)
+    # audioBytes = generate(
+    #     text=aiResponse,
+    #     voice='Bella',
+    #     model='eleven_monolingual_v1'
+    # )
+    CHUNK_SIZE = 1024
+    bellaVoiceID = 'EXAVITQu4vr4xnSDxMaL'
+    url = f'https://api.elevenlabs.io/v1/text-to-speech/{bellaVoiceID}?optimize_streaming_latency=4'
+    headers = {
+        "Accept": "audio/mpeg",
+        "Content-Type": "application/json",
+        "xi-api-key": ELEVENLABS_API_KEY
+    }
+    data = {
+        "text": aiResponse,
+        "model_id": "eleven_monolingual_v1",
+    }
+    res = requests.post(url, json=data, headers=headers)
+    with open(RESPONSE_FILE, 'wb') as f:
+        for chunk in res.iter_content(chunk_size=CHUNK_SIZE):
+            if chunk:
+                f.write(chunk)
+    # save(audioBytes, RESPONSE_FILE)
     response.play(f'{NGROK_ADDRESS}/get-response-wav')
 
     # Open up a stream to listen for the response
@@ -89,7 +106,8 @@ def generate_response():
     messageHistory.append({'role': 'user', 'content': transcription})
     gptResponse = openai.ChatCompletion.create(
         model='gpt-3.5-turbo',
-        messages=messageHistory
+        messages=messageHistory,
+        max_tokens=30
     )
     aiResponse = gptResponse.choices[0].message.content
 
