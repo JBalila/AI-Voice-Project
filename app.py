@@ -4,7 +4,6 @@ from globalConstants import *
 
 # Global program variables
 aiResponse = INITIAL_PROMPT
-transcription = ''
 messageHistory = [
     {'role': 'system', 'content': 'Pretend you are calling your friend. Do not say you are an AI.'},
     {'role': 'assistant', 'content': INITIAL_PROMPT}
@@ -62,10 +61,8 @@ def prompt():
         input='speech',
         language='en-US',
         method='POST',
-        partialResultCallback=f'{NGROK_ADDRESS}/transcribe',
-        partialResultCallbackMethod='POST',
         profanityFilter=False,
-        speechTimeout='auto',
+        speechTimeout=0,
         speechModel='experimental_conversations',
         actionOnEmptyResult=True
     )
@@ -73,28 +70,20 @@ def prompt():
 
     return Response(str(response), 200, mimetype='application/xml')
 
-# Use Twilio's <Gather> verb to transcribe the call in real-time
-@app.route('/transcribe', methods=['POST'])
-def transcribe():
-    global transcription
-
-    partialSpeech = request.form.get('UnstableSpeechResult')
-    if (partialSpeech):
-        transcription = partialSpeech
-        print(transcription)
-    
-    return 'Transcribing...'
-
 # Use ChatGPT-3.5 to generate a response
 @app.route('/generate-response', methods=['POST'])
 def generate_response():
     # Declare global vars
     global messageHistory
     global aiResponse
-    global transcription
 
     # Declare local vars
     response = VoiceResponse()
+
+    # Get transcription generated from <Gather>
+    transcription = request.form.get('SpeechResult')
+    if transcription is None:
+        transcription = ''
 
     # Update <messageHistory> with <transcription> and create reply with ChatGPT
     messageHistory.append({'role': 'user', 'content': transcription})
@@ -108,7 +97,7 @@ def generate_response():
     messageHistory.append({'role': 'assistant', 'content': aiResponse})
     transcription = ''
 
-    response.redirect('/prompt', methods=['POST'])
+    response.redirect('/prompt', method='POST')
     return Response(str(response), 200, mimetype='application/xml')
 
 # Run the app
