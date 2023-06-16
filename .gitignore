@@ -1,7 +1,13 @@
+# Files with sensitive info
 .env
-.flaskenv
-/.venv
+.oldenv
+phoneNumbers.txt
+
+# Folders with sensitive info
 /recordings
 /final_recordings
 /static
+
+# Big folders that should be built independently
+/.venv
 /__pycache__

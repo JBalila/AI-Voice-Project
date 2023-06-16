@@ -15,17 +15,42 @@ app = Flask(__name__)
 # Set API Keys
 set_api_key(ELEVENLABS_API_KEY)     # For ElevenLabs
 openai.api_key = OPENAI_API_KEY     # For OpenAI
-
-# Create a call and connect it to the web server
-# This call will be used to handle the conversation
 twilioClient = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-twilioClient.calls.create(
-    to='+13059342479',
-    from_=TWILIO_PHONE_NUMBER,
-    url=f'{NGROK_ADDRESS}/prompt',
-    method='POST'
-)
 
+# Texts <number> with a message, waits a couple of seconds, and then calls <number>
+def messageThenCall(number):
+    # Make the text
+    twilioClient.messages.create(
+        to=number,
+        from_=TWILIO_PHONE_NUMBER,
+        body=INITIAL_TEXT
+    )
+
+    # Wait for <number> to receive the text...
+    time.sleep(DELAY_IN_SECONDS)
+
+    # Make the call
+    twilioClient.calls.create(
+        to=number,
+        from_=TWILIO_PHONE_NUMBER,
+        url=f'{NGROK_ADDRESS}/prompt',
+        method='POST'
+    )
+
+###################### MAIN FUNCTION #######################
+# Read phone numbers from <phoneNumbers.txt>
+phoneNumbers = []
+with open('phoneNumbers.txt', 'r') as file:
+    phoneNumbers = file.read().splitlines()
+
+# Use multiple threads to message then call numbers
+with concurrent.futures.ThreadPoolExecutor() as executor:
+    for number in phoneNumbers:
+        executor.submit(messageThenCall(number))
+
+############################################################
+
+########################## ROUTES ##########################
 # Returns the ElevenLabs generated response .wav file
 @app.route('/get-response-wav', methods=['GET'])
 def get_response_wav():
@@ -99,6 +124,8 @@ def generate_response():
 
     response.redirect('/prompt', method='POST')
     return Response(str(response), 200, mimetype='application/xml')
+
+############################################################
 
 # Run the app
 if __name__ == "__main__":
