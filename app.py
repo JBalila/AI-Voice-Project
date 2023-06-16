@@ -25,8 +25,8 @@ def messageThenCall(number):
         from_=TWILIO_PHONE_NUMBER,
         body=INITIAL_TEXT
     )
-
-    # Wait for <number> to receive the text...
+    
+    # Wait a little bit for the text message to register
     time.sleep(DELAY_IN_SECONDS)
 
     # Make the call
@@ -51,11 +51,12 @@ with concurrent.futures.ThreadPoolExecutor() as executor:
 ############################################################
 
 ########################## ROUTES ##########################
-# Returns the ElevenLabs generated response .wav file
+# Returns the ElevenLabs generated audio of the ChatGPT response
 @app.route('/get-response-wav', methods=['GET'])
 def get_response_wav():
-    if os.path.exists(RESPONSE_FILE):
-        return send_file(RESPONSE_FILE, mimetype='audio/mpeg')
+    responseFile = os.path.join(RESPONSE_FOLDER, 'response.wav')
+    if os.path.exists(responseFile):
+        return send_file(responseFile, mimetype='audio/mpeg')
     else:
         return 'Nothing to send'
 
@@ -73,10 +74,11 @@ def prompt():
     # Generate audio for <aiResponse> and play back to the recipient
     audioBytes = generate(
         text=aiResponse,
-        voice='Bella',
+        voice=VOICE,
         model='eleven_monolingual_v1'
     )
-    save(audioBytes, RESPONSE_FILE)
+    responseFile = os.path.join(RESPONSE_FOLDER, 'response.wav')
+    save(audioBytes, responseFile)
     response.play(f'{NGROK_ADDRESS}/get-response-wav')
 
     # Open up a stream to listen for the response
@@ -87,7 +89,8 @@ def prompt():
         language='en-US',
         method='POST',
         profanityFilter=False,
-        speechTimeout=0,
+        timeout=0,
+        speechTimeout='auto',
         speechModel='experimental_conversations',
         actionOnEmptyResult=True
     )

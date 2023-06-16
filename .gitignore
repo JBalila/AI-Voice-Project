@@ -3,10 +3,10 @@
 .oldenv
 phoneNumbers.txt
 
-# Folders with sensitive info
-/recordings
-/final_recordings
-/static
+# Folders with audio data
+recordings/*
+final_recordings/*
+static/*
 
 # Big folders that should be built independently
 /.venv
