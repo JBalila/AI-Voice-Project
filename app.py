@@ -116,7 +116,7 @@ def generate_response():
     # Update <messageHistory> with <transcription> and create reply with ChatGPT
     messageHistory.append({'role': 'user', 'content': transcription})
     gptResponse = openai.ChatCompletion.create(
-        model='gpt-3.5-turbo',
+        model='gpt-3.5-turbo-16k',
         messages=messageHistory
     )
     aiResponse = gptResponse.choices[0].message.content
